@@ -1,0 +1,16 @@
+1) Crée l'arborescence suivante :
+- app.py (ce fichier)
+- requirements.txt
+- templates/base.html, templates/index.html, templates/add.html
+- static/css/style.css
+- dossier vide: database/
+2) Installe les dépendances :
+      python -m venv .venv && source .venv/bin/activate  (Windows: .venv\Scripts\activate)
+      pip install -r requirements.txt
+3) Lance l'app :
+      flask --app app run --debug
+4) Ouvre http://127.0.0.1:5000
+Remarques :
+- Le "scraping" utilise une stratégie tolérante + fallback : même sans connexion, l'URL sert à déduire le titre/chapitre.
+- Le bouton "Rafraîchir" re-tente d'extraire les infos depuis la source.
+- SQLite est stocké dans ./database/manga.db

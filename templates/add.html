@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block content %}
+    <h2 class="mb-3">Ajouter un manga via URL</h2>
+    <div class="card shadow-sm">
+        <div class="card-body">
+            <form method="post">
+                <div class="mb-3">
+                    <label for="url" class="form-label">URL du chapitre (scan-manga.com ou anime-sama.com)</label>
+                    <input type="url" class="form-control" id="url" name="url" placeholder="https://www.scan-manga.com/..." required>
+                    <div class="form-text">L'application tentera d'extraire le titre, le chapitre et la couverture automatiquement.</div>
+                </div>
+                <button type="submit" class="btn btn-primary">Ajouter à la bibliothèque</button>
+                <a href="{{ url_for('index') }}" class="btn btn-outline-secondary ms-2">Annuler</a>
+            </form>
+        </div>
+    </div>
+{% endblock %}

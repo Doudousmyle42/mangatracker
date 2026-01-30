@@ -1,0 +1,647 @@
+import re
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin, urlparse
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+PLACEHOLDER_IMG = "https://via.placeholder.com/300x420?text=Manga"
+
+def create_session():
+    """Crée une session avec retry et headers réalistes"""
+    session = requests.Session()
+    
+    # Headers pour éviter la détection de bot - plus complets et réalistes
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Accept-Encoding': 'gzip, deflate, br, zstd',
+        'DNT': '1',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+        'Cache-Control': 'max-age=0',
+        'Referer': 'https://www.google.com/',
+    })
+    
+    # Configuration retry
+    retry_strategy = Retry(
+        total=3,
+        backoff_factor=2,
+        status_forcelist=[429, 500, 502, 503, 504],
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    
+    return session
+
+def _clean_text(text):
+    """Nettoie le texte des caractères indésirables"""
+    if not text:
+        return None
+    # Nettoyer les espaces multiples et caractères spéciaux
+    cleaned = re.sub(r'\s+', ' ', text.strip())
+    # Enlever les caractères de contrôle
+    cleaned = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', cleaned)
+    return cleaned if len(cleaned) > 1 else None
+
+def _extract_chapter_from_url(url: str) -> str:
+    """Extrait le numéro de chapitre depuis l'URL"""
+    # Pour scan-manga.com, pattern: Chapitre-126-FR
+    patterns = [
+        r"Chapitre[-_](\d+(?:\.\d+)?)",
+        r"chapitre[-_](\d+(?:\.\d+)?)",
+        r"chap(?:itre)?[-_](\d+(?:\.\d+)?)",
+        r"ch(?:apter)?[-_](\d+(?:\.\d+)?)",
+        r"c(\d+(?:\.\d+)?)",
+        r"/(\d+(?:\.\d+)?)/?$",
+    ]
+    
+    for pat in patterns:
+        m = re.search(pat, url, flags=re.IGNORECASE)
+        if m:
+            return m.group(1)
+    
+    # Fallback: chercher tous les nombres
+    nums = re.findall(r"\d+(?:\.\d+)?", url)
+    if nums:
+        # Prendre le plus gros nombre (souvent le chapitre)
+        return max(nums, key=lambda x: float(x))
+    
+    return "1"
+
+def _extract_title_from_url(url: str) -> str:
+    """Extrait le titre depuis l'URL de scan-manga.com"""
+    # Pattern URL: /lecture-en-ligne/Return-of-the-Iron-Blooded-Hound-Chapitre-126-FR_478862.html
+    path = urlparse(url).path
+    
+    # Extraire le segment après lecture-en-ligne
+    match = re.search(r'/lecture-en-ligne/([^/]+)', path)
+    if match:
+        segment = match.group(1)
+        # Enlever la partie chapitre et l'ID
+        # Pattern: Titre-Chapitre-X-FR_ID.html
+        title_part = re.sub(r'-Chapitre-\d+.*$', '', segment)
+        title_part = re.sub(r'_\d+\.html$', '', title_part)
+        # Remplacer les tirets par des espaces
+        title = title_part.replace('-', ' ').strip()
+        return title if title else None
+    
+    return None
+
+def _score_manga_image(url, img_element):
+    """Score une image pour déterminer si c'est probablement une couverture de manga"""
+    score = 0
+    url_lower = url.lower()
+    
+    # Points positifs pour des mots-clés dans l'URL
+    positive_keywords = ['cover', 'poster', 'thumb', 'manga', 'couverture']
+    for keyword in positive_keywords:
+        if keyword in url_lower:
+            score += 10
+    
+    # Points pour les dimensions (si présentes dans l'URL)
+    size_matches = re.findall(r'(\d+)x(\d+)', url)
+    if size_matches:
+        width, height = map(int, size_matches[0])
+        # Préférer les images rectangulaires verticales (typique des mangas)
+        if height > width and width >= 200:
+            score += 15
+        elif width >= 300 and height >= 400:
+            score += 10
+    
+    # Points pour les attributs de l'élément
+    if img_element:
+        alt_text = img_element.get('alt', '').lower()
+        if any(keyword in alt_text for keyword in positive_keywords):
+            score += 5
+        
+        # Classes CSS de l'image
+        classes = img_element.get('class', [])
+        if isinstance(classes, list):
+            class_text = ' '.join(classes).lower()
+        else:
+            class_text = str(classes).lower()
+        
+        if any(keyword in class_text for keyword in positive_keywords):
+            score += 8
+    
+    # Pénalités pour des mots-clés négatifs
+    negative_keywords = ['avatar', 'icon', 'logo', 'button', 'banner', 'ad']
+    for keyword in negative_keywords:
+        if keyword in url_lower:
+            score -= 5
+    
+    return score
+
+def _is_valid_manga_image(url):
+    """Vérifie si l'URL semble être une image de manga valide"""
+    if not url:
+        return False
+    
+    url_lower = url.lower()
+    
+    # Éviter les images système
+    invalid_patterns = [
+        '1x1', 'loading', 'spinner', 'default.', 'placeholder',
+        'avatar', 'icon', 'logo', 'banner', 'button', 'ad.', '/ads/',
+        'facebook', 'twitter', 'google', 'youtube'
+    ]
+    
+    if any(pattern in url_lower for pattern in invalid_patterns):
+        return False
+    
+    # Vérifier l'extension ou format
+    valid_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp']
+    has_valid_extension = any(url_lower.endswith(ext) for ext in valid_extensions)
+    
+    # Parfois l'extension n'est pas visible dans l'URL mais on peut deviner
+    if not has_valid_extension:
+        # Chercher des indices d'image dans l'URL
+        image_indicators = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'image', 'img']
+        has_image_indicator = any(indicator in url_lower for indicator in image_indicators)
+        if not has_image_indicator:
+            return False
+    
+    # Éviter les images trop petites (souvent des icônes)
+    size_patterns = re.findall(r'(\d+)x(\d+)', url)
+    if size_patterns:
+        width, height = map(int, size_patterns[0])
+        if width < 80 or height < 80:  # Trop petit pour être une couverture
+            return False
+        if width > 2000 or height > 2000:  # Probablement trop grand
+            return False
+    
+    # URL trop courte = probablement pas une vraie image
+    if len(url) < 20:
+        return False
+    
+    return True
+
+def parse_scan_manga_specialized(soup, url):
+    """Parser spécialisé pour scan-manga.com basé sur l'analyse de l'URL fournie"""
+    
+    print(f"[DEBUG] Parsing scan-manga URL: {url}")
+    
+    title = None
+    img = None
+    resume = None
+    
+    # 1. TITRE - Stratégies multiples
+    
+    # Stratégie 1: Extraire de l'URL (très fiable pour scan-manga.com)
+    url_title = _extract_title_from_url(url)
+    if url_title:
+        title = url_title
+        print(f"[DEBUG] Titre extrait de l'URL: {title}")
+    
+    # Stratégie 2: Sélecteurs CSS spécifiques à scan-manga
+    if not title:
+        title_selectors = [
+            "h1.entry-title",
+            "h1.post-title",
+            ".manga-title h1",
+            ".post-header h1",
+            ".entry-header h1",
+            ".page-header h1",
+            "h1",
+            ".breadcrumb a:last-child",  # Parfois le titre est dans le breadcrumb
+        ]
+        
+        for selector in title_selectors:
+            try:
+                element = soup.select_one(selector)
+                if element:
+                    candidate = _clean_text(element.get_text())
+                    if candidate and len(candidate) > 3:
+                        # Nettoyer le titre (enlever "Chapitre X", etc.)
+                        cleaned_title = re.sub(r'\s*-?\s*Chapitre\s*\d+.*$', '', candidate, flags=re.IGNORECASE)
+                        cleaned_title = re.sub(r'\s*-?\s*Chapter\s*\d+.*$', '', cleaned_title, flags=re.IGNORECASE)
+                        title = _clean_text(cleaned_title)
+                        if title:
+                            print(f"[DEBUG] Titre trouvé avec '{selector}': {title}")
+                            break
+            except Exception as e:
+                print(f"[DEBUG] Erreur avec sélecteur '{selector}': {e}")
+                continue
+    
+    # Stratégie 3: Meta tags
+    if not title:
+        meta_selectors = [
+            ("meta", {"property": "og:title"}),
+            ("meta", {"name": "title"}),
+            ("meta", {"name": "twitter:title"}),
+        ]
+        
+        for tag, attrs in meta_selectors:
+            element = soup.find(tag, attrs)
+            if element:
+                candidate = _clean_text(element.get("content"))
+                if candidate:
+                    # Nettoyer le meta title
+                    cleaned_title = re.sub(r'\s*-?\s*Scan.*$', '', candidate, flags=re.IGNORECASE)
+                    cleaned_title = re.sub(r'\s*-?\s*Chapitre\s*\d+.*$', '', cleaned_title, flags=re.IGNORECASE)
+                    title = _clean_text(cleaned_title)
+                    if title:
+                        print(f"[DEBUG] Titre trouvé via meta: {title}")
+                        break
+    
+    # 2. IMAGE - Stratégies multiples et détaillées
+    
+    print(f"[DEBUG] Recherche d'images...")
+    
+    # Stratégie 1: Meta tags (priorité haute car souvent fiables)
+    meta_image_selectors = [
+        ("meta", {"property": "og:image"}),
+        ("meta", {"name": "twitter:image"}),
+        ("meta", {"property": "og:image:url"}),
+    ]
+    
+    for tag, attrs in meta_image_selectors:
+        element = soup.find(tag, attrs)
+        if element:
+            candidate = element.get("content")
+            if candidate and _is_valid_manga_image(candidate):
+                if candidate.startswith('//'):
+                    img = 'https:' + candidate
+                elif candidate.startswith('/'):
+                    img = urljoin(url, candidate)
+                else:
+                    img = candidate
+                print(f"[DEBUG] Image trouvée via meta {attrs}: {img}")
+                break
+    
+    # Stratégie 2: Sélecteurs CSS spécialisés
+    if not img:
+        img_selectors = [
+            # Sites de manga spécifiques
+            ".manga-cover img",
+            ".post-thumbnail img",
+            ".entry-thumb img", 
+            ".manga-poster img",
+            ".cover-image img",
+            ".wp-post-image",
+            ".attachment-post-thumbnail",
+            ".post-img img",
+            ".featured-image img",
+            # Sélecteurs génériques mais souvent efficaces
+            ".post-content img:first-of-type",
+            ".entry-content img:first-of-type",
+            ".content img:first-of-type",
+            # Recherche par attributs
+            "img[src*='cover']",
+            "img[src*='poster']",
+            "img[src*='thumb']",
+            "img[alt*='cover']",
+            "img[class*='cover']",
+            "img[class*='poster']",
+        ]
+        
+        for selector in img_selectors:
+            try:
+                elements = soup.select(selector)
+                print(f"[DEBUG] Teste sélecteur '{selector}': {len(elements)} éléments trouvés")
+                
+                for element in elements:
+                    # Tester tous les attributs possibles
+                    attributes_to_check = [
+                        'src', 'data-src', 'data-lazy-src', 'data-original', 
+                        'data-srcset', 'srcset', 'data-image', 'data-thumb'
+                    ]
+                    
+                    for attr in attributes_to_check:
+                        candidate = element.get(attr)
+                        if candidate:
+                            # Gérer srcset (prendre la première image)
+                            if 'srcset' in attr and ',' in candidate:
+                                candidate = candidate.split(',')[0].strip().split(' ')[0]
+                            
+                            # Construire l'URL complète
+                            if candidate.startswith('//'):
+                                full_url = 'https:' + candidate
+                            elif candidate.startswith('/'):
+                                full_url = urljoin(url, candidate)
+                            elif not candidate.startswith('http'):
+                                full_url = urljoin(url, candidate)
+                            else:
+                                full_url = candidate
+                            
+                            print(f"[DEBUG] Candidate image ({attr}): {full_url}")
+                            
+                            # Vérifier si c'est une image valide
+                            if _is_valid_manga_image(full_url):
+                                img = full_url
+                                print(f"[DEBUG] ✅ Image VALIDE trouvée avec '{selector}' ({attr}): {img}")
+                                break
+                            else:
+                                print(f"[DEBUG] ❌ Image rejetée (pas valide): {full_url}")
+                    
+                    if img:
+                        break
+                if img:
+                    break
+            except Exception as e:
+                print(f"[DEBUG] Erreur avec sélecteur image '{selector}': {e}")
+                continue
+    
+    # Stratégie 3: Recherche agressive de toutes les images
+    if not img:
+        print(f"[DEBUG] Recherche agressive de toutes les images...")
+        all_images = soup.find_all('img')
+        print(f"[DEBUG] {len(all_images)} images trouvées au total")
+        
+        valid_images = []
+        for img_tag in all_images:
+            for attr in ['src', 'data-src', 'data-lazy-src', 'data-original']:
+                candidate = img_tag.get(attr)
+                if candidate:
+                    # Construire URL complète
+                    if candidate.startswith('//'):
+                        full_url = 'https:' + candidate
+                    elif candidate.startswith('/'):
+                        full_url = urljoin(url, candidate)
+                    elif not candidate.startswith('http'):
+                        full_url = urljoin(url, candidate)
+                    else:
+                        full_url = candidate
+                    
+                    if _is_valid_manga_image(full_url):
+                        score = _score_manga_image(full_url, img_tag)
+                        valid_images.append((score, full_url))
+                        print(f"[DEBUG] Image valide trouvée (score: {score}): {full_url}")
+        
+        # Prendre la meilleure image
+        if valid_images:
+            valid_images.sort(reverse=True, key=lambda x: x[0])
+            img = valid_images[0][1]
+            print(f"[DEBUG] Meilleure image sélectionnée: {img}")
+    
+    # Stratégie 4: Chercher dans les données JSON embarquées
+    if not img:
+        print(f"[DEBUG] Recherche dans les scripts JSON...")
+        scripts = soup.find_all('script', type='application/ld+json')
+        for script in scripts:
+            try:
+                import json
+                data = json.loads(script.string)
+                if isinstance(data, dict):
+                    # Chercher des champs image
+                    for key in ['image', 'thumbnail', 'poster', 'cover']:
+                        if key in data:
+                            candidate = data[key]
+                            if isinstance(candidate, str) and _is_valid_manga_image(candidate):
+                                img = candidate
+                                print(f"[DEBUG] Image trouvée dans JSON-LD: {img}")
+                                break
+                            elif isinstance(candidate, dict) and 'url' in candidate:
+                                candidate_url = candidate['url']
+                                if _is_valid_manga_image(candidate_url):
+                                    img = candidate_url
+                                    print(f"[DEBUG] Image trouvée dans JSON-LD (objet): {img}")
+                                    break
+                    if img:
+                        break
+            except:
+                continue
+    
+    # 3. RÉSUMÉ
+    resume_selectors = [
+        ".manga-summary",
+        ".manga-description", 
+        ".post-content .description",
+        ".entry-content p",
+        ".synopsis",
+        "[class*='description'] p",
+        "[class*='summary'] p",
+    ]
+    
+    for selector in resume_selectors:
+        try:
+            element = soup.select_one(selector)
+            if element:
+                candidate = _clean_text(element.get_text())
+                if candidate and len(candidate) > 30:  # Résumé suffisamment long
+                    resume = candidate[:500]  # Limiter la longueur
+                    print(f"[DEBUG] Résumé trouvé avec '{selector}': {candidate[:100]}...")
+                    break
+        except Exception as e:
+            continue
+    
+    # FALLBACKS FINAUX
+    if not title:
+        # Dernier recours: titre de la page
+        page_title = soup.find("title")
+        if page_title:
+            full_title = _clean_text(page_title.get_text())
+            if full_title:
+                # Nettoyer le titre de la page
+                parts = re.split(r'[-|–—]', full_title)
+                if parts:
+                    title = _clean_text(parts[0])
+                    if title:
+                        print(f"[DEBUG] Titre extrait du title de la page: {title}")
+    
+    if not title:
+        title = "Manga Inconnu"
+        print(f"[DEBUG] Utilisation du titre par défaut")
+    
+    if not img:
+        img = PLACEHOLDER_IMG
+        print(f"[DEBUG] Utilisation de l'image placeholder")
+    
+    chapitre = _extract_chapter_from_url(url)
+    
+    result = {
+        "titre": title,
+        "chapitre": chapitre,
+        "image": img,
+        "resume": resume,
+        "source": "scan-manga",
+    }
+    
+    print(f"[DEBUG] Résultat final: {result}")
+    return result
+
+def parse_anime_sama(soup, url):
+    """Parser pour anime-sama.com"""
+    title = None
+    img = None
+    resume = None
+    
+    print(f"[DEBUG] Parsing anime-sama URL: {url}")
+    
+    # Titre
+    title_selectors = [
+        "h1.anime-title",
+        "h1.manga-title", 
+        ".anime-info h1",
+        ".manga-info h1",
+        "h1",
+        "[class*='title'] h1"
+    ]
+    
+    for selector in title_selectors:
+        try:
+            element = soup.select_one(selector)
+            if element:
+                candidate = _clean_text(element.get_text())
+                if candidate and len(candidate) > 2:
+                    title = candidate
+                    print(f"[DEBUG] Titre trouvé: {title}")
+                    break
+        except:
+            continue
+    
+    # Meta og:title en fallback
+    if not title:
+        og_title = soup.find("meta", {"property": "og:title"})
+        if og_title:
+            title = _clean_text(og_title.get("content"))
+    
+    # Image
+    img_selectors = [
+        ".anime-poster img",
+        ".manga-poster img",
+        ".anime-cover img",
+        ".poster img",
+        "[class*='cover'] img",
+        "[class*='poster'] img"
+    ]
+    
+    for selector in img_selectors:
+        try:
+            element = soup.select_one(selector)
+            if element:
+                for attr in ['src', 'data-src', 'data-lazy-src']:
+                    candidate = element.get(attr)
+                    if candidate:
+                        full_url = urljoin(url, candidate)
+                        if _is_valid_manga_image(full_url):
+                            img = full_url
+                            break
+                if img:
+                    break
+        except:
+            continue
+    
+    # Meta og:image en fallback
+    if not img:
+        og_image = soup.find("meta", {"property": "og:image"})
+        if og_image:
+            candidate = og_image.get("content")
+            if candidate:
+                img = urljoin(url, candidate)
+    
+    # Résumé
+    resume_selectors = [
+        ".anime-synopsis",
+        ".manga-synopsis", 
+        ".synopsis",
+        "[class*='description']",
+        "[class*='summary']"
+    ]
+    
+    for selector in resume_selectors:
+        try:
+            element = soup.select_one(selector)
+            if element:
+                candidate = _clean_text(element.get_text())
+                if candidate and len(candidate) > 20:
+                    resume = candidate
+                    break
+        except:
+            continue
+    
+    # Fallbacks
+    if not title:
+        page_title = soup.find("title")
+        if page_title:
+            full_title = _clean_text(page_title.get_text())
+            if full_title:
+                parts = re.split(r'[-|–—]', full_title)
+                title = _clean_text(parts[0]) if parts else full_title
+    
+    if not title:
+        path = urlparse(url).path.strip("/")
+        if path:
+            segments = [s for s in path.split("/") if s]
+            if segments:
+                slug = segments[-1] if len(segments) > 1 else segments[0]
+                title = slug.replace('-', ' ').title()
+    
+    if not img:
+        img = PLACEHOLDER_IMG
+    
+    if not title:
+        title = "Anime/Manga Inconnu"
+    
+    chapitre = _extract_chapter_from_url(url)
+    
+    return {
+        "titre": title,
+        "chapitre": chapitre,
+        "image": img,
+        "resume": resume,
+        "source": "anime-sama",
+    }
+
+def scrape_manga_info(url: str) -> dict:
+    """Fonction principale de scraping optimisée pour scan-manga.com"""
+    print(f"[DEBUG] Démarrage du scraping pour: {url}")
+    
+    session = create_session()
+    
+    try:
+        # Ajouter un délai pour éviter la détection
+        time.sleep(1)
+        
+        response = session.get(url, timeout=15)
+        response.raise_for_status()
+        
+        print(f"[DEBUG] Page chargée avec succès (status: {response.status_code}, taille: {len(response.content)} bytes)")
+        
+        soup = BeautifulSoup(response.text, "html.parser")
+        
+        # Optionnel: sauvegarder pour debugging
+        # with open('debug_scan_manga.html', 'w', encoding='utf-8') as f:
+        #     f.write(response.text)
+        
+    except requests.exceptions.RequestException as e:
+        print(f"[ERROR] Erreur réseau: {e}")
+        # Mode fallback: essayer d'extraire depuis l'URL
+        title = _extract_title_from_url(url)
+        return {
+            "titre": title or "Manga depuis URL",
+            "chapitre": _extract_chapter_from_url(url),
+            "image": PLACEHOLDER_IMG,
+            "resume": None,
+            "source": "scan-manga",
+        }
+    except Exception as e:
+        print(f"[ERROR] Erreur inattendue: {e}")
+        soup = BeautifulSoup("<html></html>", "html.parser")
+    
+    netloc = urlparse(url).netloc.lower()
+    
+    if "scan-manga" in netloc:
+        return parse_scan_manga_specialized(soup, url)
+    elif "anime-sama" in netloc:
+        return parse_anime_sama(soup, url)
+    else:
+        # Fallback générique...
+        title = _extract_title_from_url(url)
+        return {
+            "titre": title or "Manga Inconnu",
+            "chapitre": _extract_chapter_from_url(url),
+            "image": PLACEHOLDER_IMG,
+            "resume": None,
+            "source": netloc,
+        }

@@ -1,0 +1,19 @@
+manga_tracker/
+│
+├── app.py               # Point d'entrée Flask
+├── requirements.txt     # Dépendances du projet
+├── /templates
+│   ├── base.html        # Template principal
+│   ├── index.html       # Page d’accueil avec la bibliothèque
+│   ├── add.html         # Formulaire pour ajouter un manga via URL
+│
+├── /static
+│   ├── css/
+│   │   └── style.css
+│   └── img/             # Images stockées si besoin
+│
+├── /scraper
+│   └── scraper.py       # Fonctions de scraping
+│
+└── /database
+    └── manga.db         # Base SQLite
