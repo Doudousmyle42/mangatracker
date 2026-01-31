@@ -2,29 +2,120 @@
 
 {% block content %}
 <div class="row justify-content-center">
-    <div class="col-md-8 col-lg-6">
+    <div class="col-md-10 col-lg-8">
         <h2 class="mb-4">Ajouter un manga</h2>
         
         <div class="card shadow-sm">
             <div class="card-body">
-                <form method="post">
-                    <div class="mb-3">
-                        <label for="url" class="form-label">URL du chapitre</label>
-                        <input type="url" 
-                               class="form-control" 
-                               id="url" 
-                               name="url" 
-                               placeholder="https://www.scan-manga.com/lecture-en-ligne/..." 
-                               required 
-                               autofocus>
-                        <div class="form-text">
-                            Colle l'URL d'un chapitre de scan-manga.com ou anime-sama.com
+                <form method="post" enctype="multipart/form-data">
+                    
+                    <!-- Tabs pour choisir le mode -->
+                    <ul class="nav nav-tabs mb-4" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="auto-tab" data-bs-toggle="tab" 
+                                    data-bs-target="#auto" type="button" role="tab">
+                                🤖 Automatique (via URL)
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="manual-tab" data-bs-toggle="tab" 
+                                    data-bs-target="#manual" type="button" role="tab">
+                                ✍️ Manuel
+                            </button>
+                        </li>
+                    </ul>
+
+                    <div class="tab-content">
+                        <!-- Mode Automatique -->
+                        <div class="tab-pane fade show active" id="auto" role="tabpanel">
+                            <div class="mb-3">
+                                <label for="url" class="form-label">URL du chapitre</label>
+                                <input type="url" 
+                                       class="form-control" 
+                                       id="url" 
+                                       name="url" 
+                                       placeholder="https://www.scan-manga.com/lecture-en-ligne/...">
+                                <div class="form-text">
+                                    L'application extraira automatiquement le titre, le chapitre et l'image
+                                </div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="image_file_auto" class="form-label">
+                                    📷 Image de couverture (optionnel - remplace l'image scrapée)
+                                </label>
+                                <input type="file" 
+                                       class="form-control" 
+                                       id="image_file_auto" 
+                                       name="image_file" 
+                                       accept="image/png,image/jpeg,image/jpg,image/gif,image/webp">
+                                <div class="form-text">
+                                    Si fournie, cette image sera utilisée à la place de celle du site
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Mode Manuel -->
+                        <div class="tab-pane fade" id="manual" role="tabpanel">
+                            <div class="mb-3">
+                                <label for="titre_manuel" class="form-label">Titre du manga *</label>
+                                <input type="text" 
+                                       class="form-control" 
+                                       id="titre_manuel" 
+                                       name="titre_manuel" 
+                                       placeholder="Ex: One Piece">
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="chapitre_manuel" class="form-label">Dernier chapitre lu</label>
+                                <input type="text" 
+                                       class="form-control" 
+                                       id="chapitre_manuel" 
+                                       name="chapitre_manuel" 
+                                       placeholder="Ex: 126"
+                                       value="1">
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="url_lecture" class="form-label">URL de lecture (optionnel)</label>
+                                <input type="url" 
+                                       class="form-control" 
+                                       id="url_lecture" 
+                                       name="url_lecture" 
+                                       placeholder="https://...">
+                                <div class="form-text">
+                                    Lien vers le site où vous lisez ce manga
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="image_file_manual" class="form-label">
+                                    📷 Image de couverture *
+                                </label>
+                                <input type="file" 
+                                       class="form-control" 
+                                       id="image_file_manual" 
+                                       name="image_file" 
+                                       accept="image/png,image/jpeg,image/jpg,image/gif,image/webp">
+                                <div class="form-text">
+                                    Formats acceptés: PNG, JPG, GIF, WebP (max 16MB)
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="resume_manuel" class="form-label">Résumé (optionnel)</label>
+                                <textarea class="form-control" 
+                                          id="resume_manuel" 
+                                          name="resume_manuel" 
+                                          rows="3"
+                                          placeholder="Courte description du manga..."></textarea>
+                            </div>
                         </div>
                     </div>
                     
                     <div class="alert alert-info small">
-                        <strong>ℹ️ Note :</strong> L'application extraira automatiquement le titre, 
-                        le numéro de chapitre et l'image de couverture depuis l'URL.
+                        <strong>💡 Astuce :</strong> En mode automatique, si vous uploadez une image, 
+                        elle remplacera celle extraite du site web.
                     </div>
                     
                     <div class="d-flex gap-2">
@@ -40,7 +131,7 @@
         </div>
         
         <div class="mt-4">
-            <h5 class="mb-3">Exemples d'URLs supportées :</h5>
+            <h5 class="mb-3">Exemples d'URLs supportées (mode automatique) :</h5>
             <ul class="list-group small">
                 <li class="list-group-item">
                     <strong>scan-manga.com :</strong><br>

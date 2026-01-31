@@ -29,19 +29,24 @@
                     <form action="{{ url_for('update', manga_id=m.id) }}" method="post" class="d-flex gap-2 mb-2">
                         <input type="text" name="chapitre" class="form-control form-control-sm" 
                                placeholder="N° chapitre" required>
-                        <button class="btn btn-primary btn-sm" type="submit">Mettre à jour</button>
+                        <button class="btn btn-primary btn-sm" type="submit">📝</button>
                     </form>
                     
-                    <div class="d-flex gap-2">
+                    <div class="d-flex gap-2 mb-2">
                         <form action="{{ url_for('refresh', manga_id=m.id) }}" method="post" class="flex-fill">
-                            <button class="btn btn-outline-secondary btn-sm w-100" type="submit">🔄</button>
+                            <button class="btn btn-outline-secondary btn-sm w-100" type="submit" 
+                                    title="Rafraîchir depuis le site">🔄</button>
                         </form>
-                        <a href="{{ m.url }}" target="_blank" class="btn btn-outline-dark btn-sm flex-fill">🔗</a>
-                        <form action="{{ url_for('delete', manga_id=m.id) }}" method="post" 
-                              onsubmit="return confirm('Supprimer {{ m.titre }} ?');" class="flex-fill">
-                            <button class="btn btn-outline-danger btn-sm w-100" type="submit">🗑️</button>
-                        </form>
+                        <a href="{{ m.url }}" target="_blank" class="btn btn-outline-dark btn-sm flex-fill" 
+                           title="Ouvrir l'URL">🔗</a>
+                        <a href="{{ url_for('edit', manga_id=m.id) }}" class="btn btn-outline-info btn-sm flex-fill"
+                           title="Éditer">✏️</a>
                     </div>
+                    
+                    <form action="{{ url_for('delete', manga_id=m.id) }}" method="post" 
+                          onsubmit="return confirm('Supprimer {{ m.titre }} ?');">
+                        <button class="btn btn-outline-danger btn-sm w-100" type="submit">🗑️ Supprimer</button>
+                    </form>
                 </div>
             </div>
         </div>
