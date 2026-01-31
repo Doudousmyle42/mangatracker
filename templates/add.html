@@ -1,17 +1,57 @@
 {% extends 'base.html' %}
+
 {% block content %}
-    <h2 class="mb-3">Ajouter un manga via URL</h2>
-    <div class="card shadow-sm">
-        <div class="card-body">
-            <form method="post">
-                <div class="mb-3">
-                    <label for="url" class="form-label">URL du chapitre (scan-manga.com ou anime-sama.com)</label>
-                    <input type="url" class="form-control" id="url" name="url" placeholder="https://www.scan-manga.com/..." required>
-                    <div class="form-text">L'application tentera d'extraire le titre, le chapitre et la couverture automatiquement.</div>
-                </div>
-                <button type="submit" class="btn btn-primary">Ajouter à la bibliothèque</button>
-                <a href="{{ url_for('index') }}" class="btn btn-outline-secondary ms-2">Annuler</a>
-            </form>
+<div class="row justify-content-center">
+    <div class="col-md-8 col-lg-6">
+        <h2 class="mb-4">Ajouter un manga</h2>
+        
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <form method="post">
+                    <div class="mb-3">
+                        <label for="url" class="form-label">URL du chapitre</label>
+                        <input type="url" 
+                               class="form-control" 
+                               id="url" 
+                               name="url" 
+                               placeholder="https://www.scan-manga.com/lecture-en-ligne/..." 
+                               required 
+                               autofocus>
+                        <div class="form-text">
+                            Colle l'URL d'un chapitre de scan-manga.com ou anime-sama.com
+                        </div>
+                    </div>
+                    
+                    <div class="alert alert-info small">
+                        <strong>ℹ️ Note :</strong> L'application extraira automatiquement le titre, 
+                        le numéro de chapitre et l'image de couverture depuis l'URL.
+                    </div>
+                    
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            ➕ Ajouter à la bibliothèque
+                        </button>
+                        <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">
+                            Annuler
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <div class="mt-4">
+            <h5 class="mb-3">Exemples d'URLs supportées :</h5>
+            <ul class="list-group small">
+                <li class="list-group-item">
+                    <strong>scan-manga.com :</strong><br>
+                    <code class="text-muted">https://www.scan-manga.com/lecture-en-ligne/Nom-du-Manga-Chapitre-123-FR_xxxxx.html</code>
+                </li>
+                <li class="list-group-item">
+                    <strong>anime-sama.com :</strong><br>
+                    <code class="text-muted">https://anime-sama.com/catalogue/nom-du-manga/chapitre-123</code>
+                </li>
+            </ul>
         </div>
     </div>
+</div>
 {% endblock %}
